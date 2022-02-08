@@ -3,9 +3,9 @@ from datetime import datetime
 import pandas as pd
 from flask import Flask, jsonify
 import requests
+import logging
 
 APP_NAME = "CryptoWat Tracker"
-# TIMER_THRESHOLD = 5
 TIMER_THRESHOLD = 60
 
 
@@ -18,7 +18,9 @@ class RepeatTimer(Timer):
 
 class CryptoDataTracker:
 
-    def __init__(self):
+    def __init__(self, time_threshold=None):
+        logging.getLogger().setLevel(logging.INFO)
+        self.time_threshold = time_threshold if time_threshold is not None else TIMER_THRESHOLD
         self.data = {}
         self.app = Flask(APP_NAME)
         self._start_timer()
@@ -28,7 +30,8 @@ class CryptoDataTracker:
         """
         Just initializing the thread repeater for querying the data from the criptoWat's API
         """
-        timer = RepeatTimer(TIMER_THRESHOLD, self._get_market_metrics)
+        logging.info("Starts querying the data from cryptoWat, every {} seconds".format(self.time_threshold))
+        timer = RepeatTimer(self.time_threshold, self._get_market_metrics)
         timer.start()
 
     def _get_market_metrics(self):
@@ -39,13 +42,28 @@ class CryptoDataTracker:
         TODO: when the business meaning of the markets will be clear, change the variable matching to this meaning
         """
         update_time = datetime.utcnow()
-        data_json = requests.get("https://api.cryptowat.ch/markets/prices").json()
+        data_json = self._query_cryptowat_api()
+        if 'error' in data_json.keys():
+            return
         basic_df = self._get_dict_from_prices(data_json)
         # for metric in ['btcusd', 'zrxbusd']:
         for metric in basic_df.index:
             metric_df = pd.DataFrame([basic_df.loc[metric].iloc[0]])
             metric_df['update_time'] = update_time
             self.data[metric] = pd.concat([self.data.get(metric, pd.DataFrame()), metric_df])
+
+    @staticmethod
+    def _query_cryptowat_api():
+        data_json = {"error": 0}
+        try:
+            for trial in range(1, 4):
+                data_json = requests.get("https://api.cryptowat.ch/markets/prices").json()
+                if 'error' not in data_json.keys():
+                    break
+                logging.error("Trial {} out of {} has failed".format(trial, 3))
+        except Exception as e:
+            logging.error("Failed in reach CryptoWat API: {}".format(e))
+        return data_json
 
     @staticmethod
     def _get_dict_from_prices(data_json):
@@ -71,6 +89,7 @@ class CryptoDataTracker:
         self.app.run()
 
     def restart_data(self):
+        logging.info("Restarting the data")
         del self.data
         self.data = {}
         return jsonify(None)
@@ -82,18 +101,24 @@ class CryptoDataTracker:
         return jsonify(data_as_json)
 
     def get_price(self, metric):
-        df = self.data.get(metric)
+        df = self._get_metric_data(metric)
         if df is None:
             return jsonify(False)
         return jsonify(df.to_dict('records'))
 
     def get_rank(self, metric):
-        df = self.data.get(metric)
+        df = self._get_metric_data(metric)
         if df is None:
             return jsonify(False)
         return jsonify(df.std().to_dict())
 
+    def _get_metric_data(self, metric):
+        df = self.data.get(metric)
+        if df is None:
+            logging.error("The metric {} does not exist, may you have a typo?".format(metric))
+        return df
+
 
 if __name__ == '__main__':
-    cr = CryptoDataTracker()
+    cr = CryptoDataTracker(5)
     pass
