@@ -26,6 +26,6 @@ A simple service that tracks data
 4. http://127.0.0.1:5000/get_data
    - Returning a dict with all the metrics as keys and prices (with get_price's pattern) as values
 
-### Also, you can cleaning the data with this POST query:
+### Also, you can clean the data with this POST query:
 
 - http://127.0.0.1:5000/restart_data
